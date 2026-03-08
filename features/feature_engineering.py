@@ -5,16 +5,30 @@ import ta
 
 def create_features(df):
 
-     df = df.copy()
+    df = df.copy()
 
-    # ensure Price column exists
-    if "Price" not in df.columns:
-        if "Adj Close" in df.columns:
-            df["Price"] = df["Adj Close"]
-        else:
-            df["Price"] = df["Close"]
+    # Ensure dataframe not empty
+    if df.empty:
+        raise ValueError("No data available to create features")
+
+    # Force correct price column
+    if "Adj Close" in df.columns:
+        df["Price"] = df["Adj Close"]
+    else:
+        df["Price"] = df["Close"]
+
+    df["Price"] = pd.to_numeric(df["Price"], errors="coerce")
+
+    # Remove NaNs before calculating return
+    df.dropna(subset=["Price"], inplace=True)
+
+    # Check again
+    if df["Price"].empty:
+        raise ValueError("Price column empty")
 
     df["Return"] = df["Price"].pct_change()
+
+    df.dropna(inplace=True)
 
     # =========================
     # Moving Averages
