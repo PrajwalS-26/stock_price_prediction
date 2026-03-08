@@ -17,6 +17,7 @@ def load_stock_data(ticker, period="10y"):
 
     # Keep useful columns
     df = df[["Date", "Open", "High", "Low", "Close", "Volume", "Price"]]
+    df.dropna(inplace=True)
 
     return df
 
