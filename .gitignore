@@ -1,0 +1,25 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Data + trained artifacts
+data/cache/
+data/*.db
+saved_models/*/
+!saved_models/.gitkeep
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE / OS / scratch
+.vscode/
+.DS_Store
+_tmp_apptest.py
+
+# Logs / env
+*.log
+.env
