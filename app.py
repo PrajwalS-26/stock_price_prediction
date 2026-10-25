@@ -1,4 +1,4 @@
-﻿"""AI Stock Prediction Dashboard — Streamlit-only UI over the shared ML core.
+"""AI Stock Prediction Dashboard — Streamlit-only UI over the shared ML core.
 
 Run:  streamlit run app.py
 
@@ -331,16 +331,27 @@ with tab_overview:
         st.subheader("Trading Signal")
         signal_badge(result["signal"])
         st.markdown("")
+        sent_sig = result.get("sentiment", {}).get("sentiment_signal", "HOLD")
+        sent_color = "#16c784" if sent_sig == "BUY" else ("#ea3943" if sent_sig == "SELL" else "#f0b90b")
         st.markdown(
-            f'<div class="subcard">Model: <b>{result["model_signal"]}</b> · '
-            f'News sentiment: <b>{sent["label"]}</b> ({sent["score"]:+.2f})<br>'
-            f'Direction classifier: <b>{result["direction"] or "—"}</b></div>',
+            f'<div class="subcard">'
+            f'<b>Technical Model:</b> {result["model_signal"]} ({result["expected_return"]*100:+.2f}% expected)<br>'
+            f'<b>News Sentiment:</b> <span style="color:{sent_color}; font-weight:700;">{sent_sig}</span> ({sent["label"]}, {sent["score"]*100:+.1f}/100)<br>'
+            f'<b>Direction Classifier:</b> <b>{result["direction"] or "—"}</b>'
+            f'</div>',
             unsafe_allow_html=True,
         )
-        st.caption(
-            f"Based on data up to **{result['predicted_on']}**. Signal = XGBoost 1-day "
-            "return model (±0.5% threshold), tilted by FinBERT news sentiment."
-        )
+        if result["model_signal"] == "BUY" and sent_sig == "SELL":
+            st.caption(
+                f"⚠️ **Conflict Hedge:** Technical model forecasts price rise, but news sentiment is **SELL ({sent['score']*100:+.1f}/100)**. "
+                "Recommendation is downgraded to **HOLD** to avoid buying into negative headlines."
+            )
+        elif result["model_signal"] == result["signal"] and sent_sig == result["signal"] and result["signal"] != "HOLD":
+            st.caption(f"✅ **High Alignment:** Both technical model and news sentiment agree on **{result['signal']}**.")
+        else:
+            st.caption(
+                f"Based on data up to **{result['predicted_on']}**. Multi-factor decision combining XGBoost return and FinBERT news intelligence."
+            )
 
     with mid:
         st.subheader("Expected Returns (XGBoost)")
@@ -510,7 +521,7 @@ with tab_sent:
     score = sent["score"]
     c1, c2 = st.columns([1, 2])
     with c1:
-        color = "#16c784" if score >= 0.3 else ("#ea3943" if score <= -0.3 else "#f0b90b")
+        color = "#16c784" if score >= 0.05 else ("#ea3943" if score <= -0.03 else "#f0b90b")
         figg = go.Figure(go.Indicator(
             mode="gauge+number",
             value=score * 100,
@@ -520,9 +531,9 @@ with tab_sent:
                 "axis": {"range": [-100, 100], "tickcolor": "#8b94a8"},
                 "bar": {"color": color},
                 "steps": [
-                    {"range": [-100, -30], "color": "#3d1a1f"},
-                    {"range": [-30, 30], "color": "#3d3a1a"},
-                    {"range": [30, 100], "color": "#153d27"},
+                    {"range": [-100, -3], "color": "#3d1a1f"},
+                    {"range": [-3, 5], "color": "#3d3a1a"},
+                    {"range": [5, 100], "color": "#153d27"},
                 ],
                 "threshold": {"line": {"color": "#e6e9ef", "width": 2}, "value": score * 100},
             },
@@ -532,18 +543,37 @@ with tab_sent:
         st.metric("Headlines analysed", sent["count"], help=f"engine: {sent['engine']}")
 
     with c2:
+        sent_sig = result.get("sentiment", {}).get("sentiment_signal", "HOLD")
+        sig_color = "#16c784" if sent_sig == "BUY" else ("#ea3943" if sent_sig == "SELL" else "#f0b90b")
+        conf = result.get("sentiment", {}).get("confidence", "medium")
+        
         st.markdown(
-            f'<div class="subcard">Model says <b>{result["model_signal"]}</b> → '
-            f'sentiment-tilted signal <b>{result["signal"]}</b> '
-            f'(confidence: {result["sentiment"]["confidence"] if result["sentiment"] else "n/a"})'
+            f'<div class="subcard">'
+            f'<div style="font-size:1.15rem; margin-bottom:10px;"><b>Sentiment Verdict: <span style="color:{sig_color};">{sent_sig}</span></b> '
+            f'<span style="font-size:0.85rem; color:#8b94a8;">(Confidence: {conf})</span></div>'
+            f'• <b>Technical Model (XGBoost):</b> {result["model_signal"]} ({result["expected_return"]*100:+.2f}% expected return)<br>'
+            f'• <b>News Sentiment (FinBERT):</b> <span style="color:{sig_color}; font-weight:700;">{sent_sig}</span> (Score: {score*100:+.1f}/100, {sent["label"]})<br>'
+            f'• <b>Consensus Recommendation:</b> <b style="font-size:1.05rem;">{result["signal"]}</b>'
             f'</div>',
             unsafe_allow_html=True,
         )
+        if result["model_signal"] == "BUY" and sent_sig == "SELL":
+            st.info(
+                f"💡 **Risk Management Logic:** Technical model predicts a price rise (+{result['expected_return']*100:.2f}%), "
+                f"but news sentiment is **SELL ({score*100:+.1f}/100)**. In quant investing, buying into negative headlines carries high downside risk, "
+                f"so the signal is safely hedged to **HOLD**."
+            )
+        elif result["model_signal"] == "SELL" and sent_sig == "SELL":
+            st.success(
+                f"💡 **High Conviction:** Both the technical forecasting model and recent news headlines agree on **SELL**."
+            )
+        elif result["model_signal"] == "BUY" and sent_sig == "BUY":
+            st.success(
+                f"💡 **High Conviction:** Both the technical forecasting model and recent news headlines agree on **BUY**."
+            )
         st.caption(
-            "FinBERT (transformers) scores each headline in [-1, 1]; strong negative "
-            "sentiment downgrades BUY → HOLD and vice-versa. RSS headlines only cover "
-            "recent days, so sentiment tilts the *live* signal rather than acting as a "
-            "training feature — India VIX + NIFTY regime features serve that role."
+            "FinBERT (transformers) scans recent news headlines. Aggregated scores below -3/100 indicate net negative news pressure (SELL), "
+            "scores above +5/100 indicate bullish news (BUY), and values between are neutral."
         )
         for hl in sent["headlines"]:
             pub = (hl.get("published") or "")[:10]

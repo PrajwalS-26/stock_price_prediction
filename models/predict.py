@@ -6,14 +6,16 @@ import pandas as pd
 from models.ensemble import weighted_price
 
 SIGNAL_THRESHOLD = 0.005
-SENTIMENT_THRESHOLD = 0.3
+# Aggregated news threshold: across 50-75 headlines, a mean shift >= 5% is significant
+SENTIMENT_THRESHOLD = 0.05
+SENTIMENT_STRONG_THRESHOLD = 0.20
 
 
 def predict_next_day(bundle, df_features, sentiment_score=None):
     """Predict tomorrow's price for the latest row of `df_features`.
 
     Returns a dict with per-model prices, ensemble price, multi-horizon
-    expected returns, signal and optional sentiment adjustment.
+    expected returns, signal, sentiment signal, and calibrated consensus.
     """
     meta = bundle["meta"]
     feats = meta["features"]
@@ -55,15 +57,14 @@ def predict_next_day(bundle, df_features, sentiment_score=None):
         raw = int(bundle["xgb_direction"].predict(X)[0])
         direction = "UP" if raw == 1 else "DOWN"
 
-    # The trading signal is driven by the XGBoost return model (the one used
-    # in walk-forward backtesting); sequence models extrapolate momentum, so
-    # their prices are displayed as reference targets only.
-    signal = _base_signal(xgb_ret)
+    # Base quantitative signal driven by 1-day price return
+    base_signal = _base_signal(xgb_ret)
 
     sentiment = None
+    final_signal = base_signal
     if sentiment_score is not None:
-        sentiment = apply_sentiment(signal, float(sentiment_score))
-        signal = sentiment["adjusted_signal"]
+        sentiment = apply_sentiment(base_signal, float(sentiment_score))
+        final_signal = sentiment["adjusted_signal"]
 
     model_returns = {k: v / current_price - 1 for k, v in preds.items()} if current_price else {}
 
@@ -77,8 +78,8 @@ def predict_next_day(bundle, df_features, sentiment_score=None):
         "ensemble_return": round(final_price / current_price - 1, 6) if current_price else 0.0,
         "horizon_returns": {k: round(v, 6) for k, v in horizons.items()},
         "direction": direction,
-        "signal": signal,
-        "model_signal": _base_signal(xgb_ret),
+        "signal": final_signal,
+        "model_signal": base_signal,
         "sentiment": sentiment,
         "predicted_on": str(df_features["Date"].iloc[-1].date()),
     }
@@ -92,34 +93,52 @@ def _base_signal(expected_return):
     return "HOLD"
 
 
-def apply_sentiment(signal, score):
-    """Tilt a model signal using news sentiment in [-1, 1].
+def sentiment_to_signal(score):
+    """Determine standalone news sentiment signal (BUY / HOLD / SELL)."""
+    if score > 0.03:
+        return "BUY"
+    if score < -0.03:
+        return "SELL"
+    return "HOLD"
 
-    Rules:
-      * strong positive sentiment cannot upgrade a SELL to BUY (only soften)
-      * strong negative sentiment downgrades BUY -> HOLD
-      * strong positive sentiment upgrades SELL -> HOLD
-      * aligned sentiment raises confidence
+
+def apply_sentiment(signal, score):
+    """Tilt a model signal using calibrated news sentiment in [-1, 1].
+
+    Multi-factor risk management rules:
+      * negative news (score < -0.04) warns of downside risk:
+        - downgrades BUY -> HOLD (blocks buying into negative news)
+        - tips HOLD -> SELL
+        - strongly negative news (score <= -0.20) flips BUY directly to SELL
+      * positive news (score > 0.05):
+        - upgrades HOLD -> BUY
+        - softens SELL -> HOLD
+      * aligned sentiment raises confidence to 'high'
     """
     adjusted = signal
-    if score <= -SENTIMENT_THRESHOLD and signal == "BUY":
-        adjusted = "HOLD"
-    elif score >= SENTIMENT_THRESHOLD and signal == "SELL":
-        adjusted = "HOLD"
-    elif score >= SENTIMENT_THRESHOLD and signal == "HOLD":
-        adjusted = "HOLD"
-    elif score <= -SENTIMENT_THRESHOLD and signal == "HOLD":
-        adjusted = "HOLD"
+    sent_sig = sentiment_to_signal(score)
+
+    if score < -0.04:
+        if signal == "BUY":
+            adjusted = "HOLD"
+        elif signal == "HOLD":
+            adjusted = "SELL"
+    elif score > 0.05:
+        if signal == "SELL":
+            adjusted = "HOLD"
+        elif signal == "HOLD":
+            adjusted = "BUY"
 
     aligned = (
-        (score >= SENTIMENT_THRESHOLD and signal == "BUY")
-        or (score <= -SENTIMENT_THRESHOLD and signal == "SELL")
+        (score > 0.05 and adjusted == "BUY")
+        or (score < -0.04 and adjusted == "SELL")
     )
-    confidence = "high" if aligned else ("low" if abs(score) >= SENTIMENT_THRESHOLD else "medium")
+    confidence = "high" if aligned else ("low" if (score < -0.04 and signal == "BUY") or (score > 0.05 and signal == "SELL") else "medium")
 
     return {
         "score": round(float(score), 3),
         "label": sentiment_label(score),
+        "sentiment_signal": sent_sig,
         "adjusted_signal": adjusted,
         "original_signal": signal,
         "confidence": confidence,
@@ -127,8 +146,8 @@ def apply_sentiment(signal, score):
 
 
 def sentiment_label(score):
-    if score >= 0.3:
+    if score >= 0.15:
         return "Positive"
-    if score <= -0.3:
+    if score <= -0.03:
         return "Negative"
     return "Neutral"

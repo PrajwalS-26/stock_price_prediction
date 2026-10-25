@@ -133,8 +133,8 @@ def get_sentiment(ticker, engine="auto", refresh=False):
 
 
 def _label(score):
-    if score >= 0.3:
+    if score >= 0.15:
         return "Positive"
-    if score <= -0.3:
+    if score <= -0.03:
         return "Negative"
     return "Neutral"

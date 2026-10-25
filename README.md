@@ -1,5 +1,7 @@
 # Stock Market Prediction — NSE Equity Price Forecasting & Trading Signal System
 
+> 📚 **Complete Documentation:** A beginner-friendly, in-depth guide explaining every concept from scratch is available in [**`docs/PROJECT_DOCUMENTATION.md`**](docs/PROJECT_DOCUMENTATION.md).
+
 A machine-learning major project that predicts next-day closing prices for any
 stock using a hybrid **XGBoost + LSTM + GRU** ensemble, adds **FinBERT news
 sentiment** tilt, and validates signals with **walk-forward backtesting** — all

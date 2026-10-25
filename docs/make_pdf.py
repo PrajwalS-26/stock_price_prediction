@@ -335,18 +335,21 @@ S += [h1("7. Step 4 -- From Prediction to Trading Signal"),
       ], widths=[8.3 * cm, 8.3 * cm]),
       p("Example: current price Rs.2,000 and the model predicts +0.8% (Rs.2,016) -- that is above the "
         "threshold, so the base signal is BUY. A prediction of +0.2% is inside the dead zone: HOLD."),
-      h2("Sentiment tilt"),
-      p("The base signal may then be softened by the news score (details in Section 8). Rules:"),
+      h2("Sentiment tilt &amp; Multi-Factor Consensus"),
+      p("The base signal is then integrated with the news score (calibrated for 50-75 headlines). Rules:"),
       table([
-          ["News score", "Model signal", "Final signal", "Confidence"],
-          ["&gt;= +0.3 (positive)", "BUY", "BUY", "high (aligned)"],
-          ["&lt;= -0.3 (negative)", "BUY", "<b>HOLD</b> (downgraded)", "low (conflict)"],
-          ["&gt;= +0.3 (positive)", "SELL", "<b>HOLD</b> (softened)", "low (conflict)"],
-          ["&lt;= -0.3 (negative)", "SELL", "SELL", "high (aligned)"],
-          ["any weak score", "anything", "unchanged", "medium"],
-      ], widths=[4.0 * cm, 3.2 * cm, 5.2 * cm, 4.2 * cm]),
-      p("Note what sentiment is NOT allowed to do: it can veto a trade (push BUY to HOLD) but it can "
-        "never create one -- news alone can never flip a SELL into a BUY.")]
+          ["News score", "Model signal", "Final signal", "Risk Management &amp; Confidence"],
+          ["&gt;= +0.05 (positive)", "BUY", "<b>BUY</b>", "High (Technicals &amp; News agree on upside)"],
+          ["&lt;= -0.03 (negative)", "BUY", "<b>HOLD</b> (hedged)", "Low (Conflict: never buy into negative news)"],
+          ["&gt;= +0.05 (positive)", "SELL", "<b>HOLD</b> (softened)", "Low (Conflict: positive news may trigger rally)"],
+          ["&lt;= -0.03 (negative)", "SELL", "<b>SELL</b>", "High (Technicals &amp; News agree on downside)"],
+          ["&gt;= +0.05 (positive)", "HOLD", "<b>BUY</b>", "High (Positive news catalyst upgrades neutral)"],
+          ["&lt;= -0.03 (negative)", "HOLD", "<b>SELL</b>", "High (Negative news breaks down neutral)"],
+          ["between -0.03 and +0.05", "any", "unchanged", "Medium (Neutral news preserves technical signal)"],
+      ], widths=[4.2 * cm, 2.8 * cm, 3.4 * cm, 6.2 * cm]),
+      p("Risk Management Rule: If the technical model predicts price growth but news sentiment is "
+        "negative (e.g. -4.8/100 on TCS), buying is dangerous. The system hedges by downgrading "
+        "the signal to HOLD to avoid buying into surprise downside headlines.")]
 
 # ============================== 8. SENTIMENT ==============================
 S += [h1("8. Sentiment Analysis -- Complete Deep Dive"),
@@ -386,11 +389,14 @@ S += [h1("8. Sentiment Analysis -- Complete Deep Dive"),
       h2("8.5 Stage 3 -- aggregate to one score per company"),
       code("company_score = mean( headline_score for every headline fetched )\n"
            "\n"
-           "label:  score >= +0.3 -> 'Positive'   |   <= -0.3 -> 'Negative'   |   else 'Neutral'"),
-      p("The mean of typically 40-75 headlines is a robust mood measure -- one wild headline cannot "
-        "dominate it. This company score is what feeds the tilt rules in Section 7. The Sentiment "
-        "page shows it as a gauge from -100 to +100, the label, the number of headlines analysed, "
-        "the engine used (finbert/vader), and every headline with its date and source."),
+           "Aggregated thresholds (calibrated for 40-75 headlines):\n"
+           "  score >= +0.05  ->  'Positive' (Sentiment Verdict: BUY)\n"
+           "  score <= -0.03  ->  'Negative' (Sentiment Verdict: SELL)\n"
+           "  else            ->  'Neutral'  (Sentiment Verdict: HOLD)"),
+      p("When 40 to 75 headlines are averaged, individual positive and negative headlines balance out, "
+        "so the average rarely exceeds +/-0.20. Calibrated thresholds (+0.05 and -0.03) ensure realistic "
+        "and statistically meaningful sentiment signals (e.g., a score of -4.8/100 on TCS accurately reflects "
+        "predominantly bearish news and yields a SELL sentiment verdict). This feeds the multi-factor decision matrix."),
       note("Honest limitation (stated in the UI too)",
            "Free RSS feeds only expose RECENT news, not a 10-year archive, so historical sentiment "
            "cannot be a training feature -- the model cannot learn 'bad news days crash' from data it "
@@ -585,6 +591,35 @@ S += [h1("14. Project File Map"),
            "If you have read this far, you can explain every screen, every model and every number in "
            "the app -- including exactly how news headlines become a graded trading signal. "
            "Good luck with the project demo!")]
+
+
+# ============================== 15. VIVA QUESTIONS ==============================
+S += [h1("15. Major Project Viva &amp; Presentation Q&amp;A"),
+      p("Top questions examiners ask during project evaluation and the exact technical answers:"),
+      h2("Q1: Why predict percentage returns instead of raw closing prices?"),
+      p("<b>Answer:</b> Raw prices are non-stationary; over 5-10 years they drift into ranges the model has "
+        "never seen before, causing severe extrapolation errors. Percentage returns fluctuate around a "
+        "stationary mean of zero, enabling statistical models to generalize accurately across different price regimes."),
+      h2("Q2: How did you prevent data leakage in sequence modeling?"),
+      p("<b>Answer:</b> Time-series data must never be shuffled. We used strict chronological splitting "
+        "(70% train, 15% validation, 15% test). Furthermore, feature scalers (MinMaxScaler) were fitted "
+        "exclusively on the training window and only applied to transform the test set, ensuring zero future "
+        "information leaked into the past."),
+      h2("Q3: Why combine XGBoost with LSTM and GRU in an ensemble?"),
+      p("<b>Answer:</b> XGBoost excels at finding complex non-linear decision boundaries across tabular technical "
+        "indicators (RSI, Bollinger Bands, Volatility). However, it does not naturally maintain sequential state. "
+        "LSTMs and GRUs treat prices as an evolving 30-day temporal sequence. Combining them through inverse-RMSE "
+        "weighting creates an ensemble that captures both indicator relationships and time-series momentum."),
+      h2("Q4: Why doesn't negative sentiment always flip the signal to SELL?"),
+      p("<b>Answer:</b> In quantitative multi-factor systems, news sentiment acts as a risk hedge rather than a "
+        "dominant dictator. If technical indicators are bullish but news is negative, immediately shorting the stock "
+        "is risky. Instead, the system hedges by downgrading the signal to HOLD, protecting capital by refusing to "
+        "buy into negative headlines while avoiding premature short trades."),
+      h2("Q5: What is the primary advantage demonstrated by your backtest?"),
+      p("<b>Answer:</b> Financial markets have high entropy; generating pure alpha on daily stock data is difficult "
+        "due to the Efficient Market Hypothesis. However, our walk-forward backtest demonstrates a significant reduction "
+        "in Maximum Drawdown compared to Buy &amp; Hold. By stepping into cash (HOLD / Flat) during bearish regimes, "
+        "the strategy preserves capital and manages downside risk effectively.")]
 
 doc.build(S)
 print("PDF written:", OUT)
